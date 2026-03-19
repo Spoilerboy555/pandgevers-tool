@@ -543,10 +543,15 @@ export default function Page() {
     setView("main");
   };
 
-  const deleteDeal = (id) => {
-  const updateDealStatus = (id, status) => {
-    const next = savedDeals.map((entry) =>
-      entry.id === id ? { ...entry, status } : entry
+ const deleteDeal = (id) => {
+  const next = savedDeals.filter((entry) => entry.id !== id);
+  setSavedDeals(next);
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+};
+
+const updateDealStatus = (id, status) => {
+  const next = savedDeals.map((entry) =>
+    entry.id === id ? { ...entry, status } : entry
   );
   setSavedDeals(next);
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
