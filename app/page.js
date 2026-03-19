@@ -655,6 +655,31 @@ const updateDealStatus = (id, status) => {
     statusFilter === "all"
       ? savedDeals
       : savedDeals.filter((d) => (d.status || "Ter beoordeling") === statusFilter);
+    
+  const totalDeals = savedDeals.length;
+    
+  const doneDeals = savedDeals.filter((d) => d.status === "Gedaan");
+  const rejectedDeals = savedDeals.filter((d) => d.status === "Afgekeurd");
+  
+  const doneCount = doneDeals.length;
+  const rejectedCount = rejectedDeals.length;
+  const openCount = totalDeals - doneCount - rejectedCount;
+  
+  const conversion =
+    totalDeals > 0 ? ((doneCount / totalDeals) * 100).toFixed(1) : 0;
+  
+  const totalRevenueDone = doneDeals.reduce(
+    (sum, d) =>
+      sum +
+      (d.costs?.adminTotal || 0) +
+      (d.costs?.investorFeeTotal || 0) +
+      (d.costs?.closingFee || 0),
+    0
+  );
+  
+  const donePct = totalDeals ? (doneCount / totalDeals) * 100 : 0;
+  const rejectedPct = totalDeals ? (rejectedCount / totalDeals) * 100 : 0;
+  const openPct = totalDeals ? (openCount / totalDeals) * 100 : 0;
     return (
       <div style={{ minHeight: "100vh", background: BRAND.cream, padding: 24 }}>
         <div style={{ maxWidth: 900, margin: "0 auto", display: "grid", gap: 24 }}>
@@ -666,6 +691,65 @@ const updateDealStatus = (id, status) => {
             </div>
           </div>
           <div style={cardStyle(false)}>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(5, minmax(0, 1fr))",
+              gap: 12,
+              marginBottom: 20,
+            }}
+          >
+            <div style={{ ...cardStyle(false), padding: 16 }}>
+              <div style={{ fontSize: 12, color: "#64748B" }}>Totaal deals</div>
+              <div style={{ fontSize: 22, fontWeight: 800 }}>{totalDeals}</div>
+            </div>
+          
+            <div style={{ ...cardStyle(false), padding: 16 }}>
+              <div style={{ fontSize: 12 }}>Gedaan</div>
+              <div style={{ fontSize: 22, fontWeight: 800, color: BRAND.greenText }}>
+                {doneCount}
+              </div>
+            </div>
+          
+            <div style={{ ...cardStyle(false), padding: 16 }}>
+              <div style={{ fontSize: 12 }}>Afgekeurd</div>
+              <div style={{ fontSize: 22, fontWeight: 800, color: BRAND.redText }}>
+                {rejectedCount}
+              </div>
+            </div>
+          
+            <div style={{ ...cardStyle(false), padding: 16 }}>
+              <div style={{ fontSize: 12 }}>Conversie</div>
+              <div style={{ fontSize: 22, fontWeight: 800 }}>
+                {conversion}%
+              </div>
+            </div>
+          
+            <div style={{ ...cardStyle(false), padding: 16 }}>
+              <div style={{ fontSize: 12 }}>Omzet (gedaan)</div>
+              <div style={{ fontSize: 18, fontWeight: 800 }}>
+                {euro(totalRevenueDone, 0)}
+              </div>
+            </div>
+          </div>
+          
+          <div style={{ ...cardStyle(false), padding: 20, marginBottom: 20 }}>
+            <div style={{ fontWeight: 800, marginBottom: 12, color: BRAND.forest }}>
+              Deal verdeling
+            </div>
+          
+            <div style={{ display: "flex", height: 20, borderRadius: 999, overflow: "hidden" }}>
+              <div style={{ width: `${donePct}%`, background: BRAND.greenBg }} />
+              <div style={{ width: `${openPct}%`, background: BRAND.orangeBg }} />
+              <div style={{ width: `${rejectedPct}%`, background: BRAND.redBg }} />
+            </div>
+          
+            <div style={{ display: "flex", gap: 16, marginTop: 10, fontSize: 12 }}>
+              <div style={{ color: BRAND.greenText }}>🟢 {doneCount}</div>
+              <div style={{ color: BRAND.orangeText }}>🟡 {openCount}</div>
+              <div style={{ color: BRAND.redText }}>🔴 {rejectedCount}</div>
+            </div>
+          </div>
             <div style={{ fontSize: 24, fontWeight: 800, color: BRAND.forest, marginBottom: 16 }}>Opgeslagen deals</div>
             <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
               {[
