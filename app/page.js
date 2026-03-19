@@ -494,6 +494,7 @@ export default function Page() {
   });
   const [savedDeals, setSavedDeals] = useState([]);
   const [view, setView] = useState("main");
+  const [statusFilter, setStatusFilter] = useState("all");
   const [rules, setRules] = useState(defaultRules);
 
   useEffect(() => {
@@ -650,6 +651,10 @@ const updateDealStatus = (id, status) => {
   }
 
   if (view === "deals") {
+  const filteredDeals =
+    statusFilter === "all"
+      ? savedDeals
+      : savedDeals.filter((d) => (d.status || "Ter beoordeling") === statusFilter);
     return (
       <div style={{ minHeight: "100vh", background: BRAND.cream, padding: 24 }}>
         <div style={{ maxWidth: 900, margin: "0 auto", display: "grid", gap: 24 }}>
@@ -662,9 +667,34 @@ const updateDealStatus = (id, status) => {
           </div>
           <div style={cardStyle(false)}>
             <div style={{ fontSize: 24, fontWeight: 800, color: BRAND.forest, marginBottom: 16 }}>Opgeslagen deals</div>
+            <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
+              {[
+                { label: "Alle", value: "all" },
+                { label: "🟡 Ter beoordeling", value: "Ter beoordeling" },
+                { label: "🟢 Gedaan", value: "Gedaan" },
+                { label: "🔴 Afgekeurd", value: "Afgekeurd" },
+              ].map((f) => (
+                <button
+                  key={f.value}
+                  onClick={() => setStatusFilter(f.value)}
+                  style={{
+                    padding: "8px 12px",
+                    borderRadius: 999,
+                    border: `1px solid ${BRAND.border}`,
+                    background: statusFilter === f.value ? BRAND.forest : BRAND.white,
+                    color: statusFilter === f.value ? BRAND.white : BRAND.forest,
+                    fontWeight: 700,
+                    fontSize: 12,
+                    cursor: "pointer",
+                  }}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
             <div style={{ display: "grid", gap: 12 }}>
               {savedDeals.length === 0 ? <div style={{ color: "#64748B" }}>Nog geen deals opgeslagen.</div> : null}
-              {savedDeals.map((entry) => (
+              {filteredDeals.map((entry) => (
                 <div key={entry.id} style={{ border: `1px solid ${BRAND.border}`, borderRadius: 18, padding: 14 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
                     <div>
