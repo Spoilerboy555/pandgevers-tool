@@ -2,6 +2,11 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 
+function num(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 const BRAND = {
   forest: "#00424D",
   peach: "#FF7E50",
@@ -18,43 +23,64 @@ const BRAND = {
   redText: "#B91C1C",
 };
 
-const MIN_RATE = 5.5;
-const MAX_RATE = 10.0;
 const STORAGE_KEY = "depandgevers_saved_deals_v3";
+const RULES_STORAGE_KEY = "depandgevers_rules_v1";
 
-const scoreMaps = {
-  locatie: { A: 1, B: 2, C: 3 },
-  debiteur: { Sterk: 1, Gemiddeld: 2, Zwak: 3 },
-  vastgoedtype: {
-    "Woning voor verhuur": 1,
-    Zorgvastgoed: 1,
-    Kantoor: 2,
-    Bedrijfsruimte: 2,
-    Ontwikkeling: 4,
-  },
-  exit: { Refinance: 1, Verkoop: 2, Onzeker: 3 },
+const defaultRules = {
+  minRate: 5.5,
+  maxRate: 10.0,
+  benchmarkBaseRate: 6.0,
+  ltvThreshold1: 55,
+  ltvThreshold2: 70,
+  ltvThreshold3: 80,
+  ltvScore1: 1,
+  ltvScore2: 2,
+  ltvScore3: 3,
+  ltvScore4: 5,
+  dscrThreshold1: 1.5,
+  dscrThreshold2: 1.25,
+  dscrScore1: 1,
+  dscrScore2: 2,
+  dscrScore3: 4,
+  looptijdThreshold1: 12,
+  looptijdThreshold2: 24,
+  looptijdScore1: 3,
+  looptijdScore2: 2,
+  looptijdScore3: 1,
+  locatieA: 1,
+  locatieB: 2,
+  locatieC: 3,
+  debiteurSterk: 1,
+  debiteurGemiddeld: 2,
+  debiteurZwak: 3,
+  vastgoedWoning: 1,
+  vastgoedZorg: 1,
+  vastgoedKantoor: 2,
+  vastgoedBedrijfsruimte: 2,
+  vastgoedOntwikkeling: 4,
+  exitRefinance: 1,
+  exitVerkoop: 2,
+  exitOnzeker: 3,
+  benchmarkLtvMidThreshold: 65,
+  benchmarkLtvHighThreshold: 75,
+  benchmarkLtvMidAdd: 0.4,
+  benchmarkLtvHighAdd: 0.75,
+  benchmarkOntwikkelingAdd: 1.0,
+  benchmarkKantoorBedrijfsruimteAdd: 0.3,
+  benchmarkDebiteurZwakAdd: 0.5,
 };
 
 function euro(value, digits = 0) {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return "€ 0";
   return new Intl.NumberFormat("nl-NL", {
     style: "currency",
     currency: "EUR",
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
-  }).format(n);
+  }).format(num(value));
 }
 
 function pct(value, digits = 2) {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return "0,00%";
-  return `${n.toFixed(digits).replace(".", ",")}%`;
-}
-
-function num(value) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : 0;
+  return `${num(value).toFixed(digits).replace(".", ",")}%`;
 }
 
 function computeLtv(taxatie, lening) {
@@ -64,11 +90,43 @@ function computeLtv(taxatie, lening) {
   return (l / t) * 100;
 }
 
-function normalizeScore(score) {
-  return Math.min(Math.max((score - 7) / 15, 0), 1);
+function normalizeScore(score, rules) {
+  const minScore = 7;
+  const maxScore =
+    num(rules.ltvScore4) +
+    num(rules.dscrScore3) +
+    num(rules.looptijdScore1) +
+    Math.max(num(rules.locatieA), num(rules.locatieB), num(rules.locatieC)) +
+    Math.max(num(rules.debiteurSterk), num(rules.debiteurGemiddeld), num(rules.debiteurZwak)) +
+    Math.max(
+      num(rules.vastgoedWoning),
+      num(rules.vastgoedZorg),
+      num(rules.vastgoedKantoor),
+      num(rules.vastgoedBedrijfsruimte),
+      num(rules.vastgoedOntwikkeling)
+    ) +
+    Math.max(num(rules.exitRefinance), num(rules.exitVerkoop), num(rules.exitOnzeker));
+
+  return Math.min(Math.max((num(score) - minScore) / Math.max(1, maxScore - minScore), 0), 1);
 }
 
-function calculateAdvice(input) {
+function getBenchmarkRate(input, rules) {
+  const ltv = computeLtv(input.taxatiewaarde, input.financieringsbedrag);
+  let base = num(rules.benchmarkBaseRate);
+
+  if (ltv > num(rules.benchmarkLtvHighThreshold)) base += num(rules.benchmarkLtvHighAdd);
+  else if (ltv > num(rules.benchmarkLtvMidThreshold)) base += num(rules.benchmarkLtvMidAdd);
+
+  if (input.vastgoedtype === "Ontwikkeling") base += num(rules.benchmarkOntwikkelingAdd);
+  if (input.vastgoedtype === "Kantoor" || input.vastgoedtype === "Bedrijfsruimte") {
+    base += num(rules.benchmarkKantoorBedrijfsruimteAdd);
+  }
+  if (input.debiteur === "Zwak") base += num(rules.benchmarkDebiteurZwakAdd);
+
+  return Math.min(Math.max(base, num(rules.minRate)), num(rules.maxRate));
+}
+
+function calculateAdvice(input, rules) {
   const taxatie = num(input.taxatiewaarde);
   const lening = num(input.financieringsbedrag);
   const dscr = num(input.dscr);
@@ -78,32 +136,48 @@ function calculateAdvice(input) {
   let score = 0;
   const breakdown = [];
 
-  let ltvScore = 0;
-  if (ltv <= 55) ltvScore = 1;
-  else if (ltv <= 70) ltvScore = 2;
-  else if (ltv <= 80) ltvScore = 3;
-  else ltvScore = 5;
+  const ltvScore =
+    ltv <= num(rules.ltvThreshold1)
+      ? num(rules.ltvScore1)
+      : ltv <= num(rules.ltvThreshold2)
+        ? num(rules.ltvScore2)
+        : ltv <= num(rules.ltvThreshold3)
+          ? num(rules.ltvScore3)
+          : num(rules.ltvScore4);
   score += ltvScore;
   breakdown.push({ label: "LTV", value: ltvScore });
 
-  let dscrScore = 0;
-  if (dscr >= 1.5) dscrScore = 1;
-  else if (dscr >= 1.25) dscrScore = 2;
-  else dscrScore = 4;
+  const dscrScore =
+    dscr >= num(rules.dscrThreshold1)
+      ? num(rules.dscrScore1)
+      : dscr >= num(rules.dscrThreshold2)
+        ? num(rules.dscrScore2)
+        : num(rules.dscrScore3);
   score += dscrScore;
   breakdown.push({ label: "DSCR", value: dscrScore });
 
-  let looptijdScore = 0;
-  if (looptijd <= 12) looptijdScore = 3;
-  else if (looptijd <= 24) looptijdScore = 2;
-  else looptijdScore = 1;
+  const looptijdScore =
+    looptijd <= num(rules.looptijdThreshold1)
+      ? num(rules.looptijdScore1)
+      : looptijd <= num(rules.looptijdThreshold2)
+        ? num(rules.looptijdScore2)
+        : num(rules.looptijdScore3);
   score += looptijdScore;
   breakdown.push({ label: "Looptijd", value: looptijdScore });
 
-  const locatieScore = scoreMaps.locatie[input.locatie] ?? 0;
-  const debiteurScore = scoreMaps.debiteur[input.debiteur] ?? 0;
-  const vastgoedScore = scoreMaps.vastgoedtype[input.vastgoedtype] ?? 0;
-  const exitScore = scoreMaps.exit[input.exitStrategie] ?? 0;
+  const locatieScore = input.locatie === "A" ? num(rules.locatieA) : input.locatie === "B" ? num(rules.locatieB) : num(rules.locatieC);
+  const debiteurScore = input.debiteur === "Sterk" ? num(rules.debiteurSterk) : input.debiteur === "Gemiddeld" ? num(rules.debiteurGemiddeld) : num(rules.debiteurZwak);
+  const vastgoedScore =
+    input.vastgoedtype === "Woning voor verhuur"
+      ? num(rules.vastgoedWoning)
+      : input.vastgoedtype === "Zorgvastgoed"
+        ? num(rules.vastgoedZorg)
+        : input.vastgoedtype === "Kantoor"
+          ? num(rules.vastgoedKantoor)
+          : input.vastgoedtype === "Bedrijfsruimte"
+            ? num(rules.vastgoedBedrijfsruimte)
+            : num(rules.vastgoedOntwikkeling);
+  const exitScore = input.exitStrategie === "Refinance" ? num(rules.exitRefinance) : input.exitStrategie === "Verkoop" ? num(rules.exitVerkoop) : num(rules.exitOnzeker);
 
   score += locatieScore + debiteurScore + vastgoedScore + exitScore;
   breakdown.push({ label: "Locatie", value: locatieScore });
@@ -111,8 +185,10 @@ function calculateAdvice(input) {
   breakdown.push({ label: "Vastgoed", value: vastgoedScore });
   breakdown.push({ label: "Exit", value: exitScore });
 
-  const normalized = normalizeScore(score);
-  const mid = MIN_RATE + (MAX_RATE - MIN_RATE) * normalized;
+  const normalized = normalizeScore(score, rules);
+  const minRate = num(rules.minRate);
+  const maxRate = num(rules.maxRate);
+  const mid = minRate + (maxRate - minRate) * normalized;
   const spread = score <= 10 ? 0.2 : score <= 14 ? 0.25 : 0.3;
 
   let riskLabel = "Laag risico";
@@ -128,13 +204,28 @@ function calculateAdvice(input) {
     riskColor = BRAND.orangeText;
   }
 
+  const benchmark = getBenchmarkRate(input, rules);
+  let pricingLabel = "Marktconform";
+  let pricingTone = "green";
+
+  if (mid < benchmark - 0.3) {
+    pricingLabel = "Onder markt (scherp)";
+    pricingTone = "orange";
+  } else if (mid > benchmark + 0.3) {
+    pricingLabel = "Boven markt";
+    pricingTone = "red";
+  }
+
   return {
     ltv,
     score,
     breakdown,
-    rateMin: Math.max(MIN_RATE, mid - spread),
-    rateMax: Math.min(MAX_RATE, mid + spread),
+    rateMin: Math.max(minRate, mid - spread),
+    rateMax: Math.min(maxRate, mid + spread),
     rateMid: mid,
+    benchmark,
+    pricingLabel,
+    pricingTone,
     riskLabel,
     riskBg,
     riskColor,
@@ -155,7 +246,7 @@ function calculateCosts(input) {
 function calculateSchedule(input, annualRate) {
   const principal = num(input.financieringsbedrag);
   const months = Math.max(1, num(input.looptijdMaanden));
-  const monthlyRate = annualRate / 100 / 12;
+  const monthlyRate = num(annualRate) / 100 / 12;
   const loanType = input.loanType;
   const monthlyAdminFee = principal * 0.005 / 12;
 
@@ -209,23 +300,27 @@ function calculateYearlyOverview(schedule, closingFee, principal) {
   for (let i = 0; i < schedule.length; i += 12) {
     const chunk = schedule.slice(i, i + 12);
     const year = Math.floor(i / 12) + 1;
-    const principalPaid = chunk.reduce((sum, row) => sum + row.principal, 0);
-    const interest = chunk.reduce((sum, row) => sum + row.interest, 0);
-    const adminFee = chunk.reduce((sum, row) => sum + row.adminFee, 0);
-    const beginBalance = i === 0 ? principal : schedule[i - 1].balance;
-    const endingBalance = chunk.length ? chunk[chunk.length - 1].balance : 0;
-
     yearly.push({
       year,
-      beginBalance,
-      principal: principalPaid,
-      interest,
-      adminFee,
+      beginBalance: i === 0 ? principal : schedule[i - 1].balance,
+      principal: chunk.reduce((sum, row) => sum + row.principal, 0),
+      interest: chunk.reduce((sum, row) => sum + row.interest, 0),
+      adminFee: chunk.reduce((sum, row) => sum + row.adminFee, 0),
       closingFee: year === 1 ? closingFee : 0,
-      endingBalance,
+      endingBalance: chunk.length ? chunk[chunk.length - 1].balance : 0,
     });
   }
   return yearly;
+}
+
+function pricingBadgeStyle(pricingTone) {
+  if (pricingTone === "orange") {
+    return { background: BRAND.orangeBg, color: BRAND.orangeText };
+  }
+  if (pricingTone === "red") {
+    return { background: BRAND.redBg, color: BRAND.redText };
+  }
+  return { background: BRAND.greenBg, color: BRAND.greenText };
 }
 
 function downloadPdf(form, result, _costs, yearlyOverview) {
@@ -259,16 +354,14 @@ function downloadPdf(form, result, _costs, yearlyOverview) {
       <tbody>
         <tr>
           <td>${pct(result.ltv, 1)}</td>
-          <td>${euro(num(form.taxatiewaarde))}</td>
-          <td>${euro(num(form.financieringsbedrag))}</td>
+          <td>${euro(form.taxatiewaarde)}</td>
+          <td>${euro(form.financieringsbedrag)}</td>
         </tr>
       </tbody>
     </table>
   `;
 
-  const riskRows = result.breakdown
-    .map((item) => `<tr><td>${item.label}</td><td>${item.value}</td></tr>`)
-    .join("");
+  const riskRows = result.breakdown.map((item) => `<tr><td>${item.label}</td><td>${item.value}</td></tr>`).join("");
 
   const content = `
     <html>
@@ -283,21 +376,17 @@ function downloadPdf(form, result, _costs, yearlyOverview) {
       </head>
       <body>
         <img src="/logo.png" style="height:60px; margin-bottom:16px;" />
-
         <h2>Rente advies</h2>
         <div><strong>${pct(result.rateMin)} - ${pct(result.rateMax)}</strong></div>
         <div>Indicatief: ${pct(result.rateMid)}</div>
         <div>Risico: ${result.riskLabel}</div>
-
         <h2>Risico-opbouw</h2>
         <table>
           <thead><tr><th>Factor</th><th>Score</th></tr></thead>
           <tbody>${riskRows}</tbody>
         </table>
-
         <h2>Kerngegevens</h2>
         ${ltvBlock}
-
         <h2>Verloopoverzicht leningnemer</h2>
         <table>
           <thead>
@@ -390,17 +479,6 @@ function Field({ label, children, note }) {
   );
 }
 
-function LogicBlock({ title, lines }) {
-  return (
-    <div>
-      <strong>{title}</strong>
-      {lines.map((line, index) => (
-        <div key={`${title}-${index}`}>{line}</div>
-      ))}
-    </div>
-  );
-}
-
 export default function Page() {
   const [form, setForm] = useState({
     dealNaam: "Nieuwe deal",
@@ -416,17 +494,21 @@ export default function Page() {
   });
   const [savedDeals, setSavedDeals] = useState([]);
   const [view, setView] = useState("main");
+  const [rules, setRules] = useState(defaultRules);
 
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem(STORAGE_KEY);
       if (raw) setSavedDeals(JSON.parse(raw));
+      const rawRules = window.localStorage.getItem(RULES_STORAGE_KEY);
+      if (rawRules) setRules({ ...defaultRules, ...JSON.parse(rawRules) });
     } catch {
       setSavedDeals([]);
+      setRules(defaultRules);
     }
   }, []);
 
-  const result = useMemo(() => calculateAdvice(form), [form]);
+  const result = useMemo(() => calculateAdvice(form, rules), [form, rules]);
   const costs = useMemo(() => calculateCosts(form), [form]);
   const schedule = useMemo(() => calculateSchedule(form, result.rateMid), [form, result.rateMid]);
   const yearlyOverview = useMemo(
@@ -467,55 +549,90 @@ export default function Page() {
   };
 
   if (view === "voorwaarden") {
+    const updateRule = (key, value) => {
+      const next = { ...rules, [key]: Number(value) };
+      setRules(next);
+      window.localStorage.setItem(RULES_STORAGE_KEY, JSON.stringify(next));
+    };
+
+    const resetRules = () => {
+      setRules(defaultRules);
+      window.localStorage.setItem(RULES_STORAGE_KEY, JSON.stringify(defaultRules));
+    };
+
     return (
       <div style={{ minHeight: "100vh", background: BRAND.cream, padding: 24 }}>
-        <div style={{ maxWidth: 900, margin: "0 auto", display: "grid", gap: 24 }}>
+        <div style={{ maxWidth: 1100, margin: "0 auto", display: "grid", gap: 24 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <Logo />
-            <button onClick={() => setView("main")} style={buttonStyle(false)}>Terug</button>
+            <div style={{ display: "flex", gap: 12 }}>
+              <button onClick={resetRules} style={buttonStyle(false)}>Reset standaard</button>
+              <button onClick={() => setView("main")} style={buttonStyle(false)}>Terug</button>
+            </div>
           </div>
           <div style={cardStyle(false)}>
             <div style={{ fontSize: 24, fontWeight: 800, color: BRAND.forest, marginBottom: 16 }}>Voorwaarden & scorelogica</div>
-            <div style={{ display: "grid", gap: 16, fontSize: 14 }}>
-              <LogicBlock
-                title="LTV scoring"
-                lines={[
-                  "≤ 55% → 1 punt",
-                  "55% - 70% → 2 punten",
-                  "70% - 80% → 3 punten",
-                  "> 80% → 5 punten",
-                ]}
-              />
-              <LogicBlock
-                title="DSCR scoring"
-                lines={[
-                  "≥ 1,50 → 1 punt",
-                  "1,25 - 1,50 → 2 punten",
-                  "< 1,25 → 4 punten",
-                ]}
-              />
-              <LogicBlock
-                title="Looptijd"
-                lines={[
-                  "≤ 12 maanden → 3 punten",
-                  "13 - 24 maanden → 2 punten",
-                  "> 24 maanden → 1 punt",
-                ]}
-              />
-              <LogicBlock
-                title="Overige factoren"
-                lines={[
-                  "Locatie, debiteur, vastgoedtype en exitstrategie bepalen aanvullende score.",
-                ]}
-              />
-              <LogicBlock
-                title="Rente bepaling"
-                lines={[
-                  `Genormaliseerde score naar bandbreedte ${MIN_RATE}% - ${MAX_RATE}%.
-`,
-                  "Lage score = scherper tarief, hoge score = hoger tarief.",
-                ]}
-              />
+            <div style={{ display: "grid", gap: 20, gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
+              <div>
+                <div style={{ fontWeight: 800, marginBottom: 10 }}>Rente & benchmark</div>
+                <Field label="Minimum rente"><input style={inputStyle()} type="number" step="0.01" value={rules.minRate} onChange={(e) => updateRule("minRate", e.target.value)} /></Field>
+                <Field label="Maximum rente"><input style={inputStyle()} type="number" step="0.01" value={rules.maxRate} onChange={(e) => updateRule("maxRate", e.target.value)} /></Field>
+                <Field label="Benchmark basisrente"><input style={inputStyle()} type="number" step="0.01" value={rules.benchmarkBaseRate} onChange={(e) => updateRule("benchmarkBaseRate", e.target.value)} /></Field>
+                <Field label="Benchmark LTV drempel midden"><input style={inputStyle()} type="number" step="0.01" value={rules.benchmarkLtvMidThreshold} onChange={(e) => updateRule("benchmarkLtvMidThreshold", e.target.value)} /></Field>
+                <Field label="Benchmark LTV opslag midden"><input style={inputStyle()} type="number" step="0.01" value={rules.benchmarkLtvMidAdd} onChange={(e) => updateRule("benchmarkLtvMidAdd", e.target.value)} /></Field>
+                <Field label="Benchmark LTV drempel hoog"><input style={inputStyle()} type="number" step="0.01" value={rules.benchmarkLtvHighThreshold} onChange={(e) => updateRule("benchmarkLtvHighThreshold", e.target.value)} /></Field>
+                <Field label="Benchmark LTV opslag hoog"><input style={inputStyle()} type="number" step="0.01" value={rules.benchmarkLtvHighAdd} onChange={(e) => updateRule("benchmarkLtvHighAdd", e.target.value)} /></Field>
+                <Field label="Benchmark opslag ontwikkeling"><input style={inputStyle()} type="number" step="0.01" value={rules.benchmarkOntwikkelingAdd} onChange={(e) => updateRule("benchmarkOntwikkelingAdd", e.target.value)} /></Field>
+                <Field label="Benchmark opslag kantoor/bedrijfsruimte"><input style={inputStyle()} type="number" step="0.01" value={rules.benchmarkKantoorBedrijfsruimteAdd} onChange={(e) => updateRule("benchmarkKantoorBedrijfsruimteAdd", e.target.value)} /></Field>
+                <Field label="Benchmark opslag debiteur zwak"><input style={inputStyle()} type="number" step="0.01" value={rules.benchmarkDebiteurZwakAdd} onChange={(e) => updateRule("benchmarkDebiteurZwakAdd", e.target.value)} /></Field>
+              </div>
+
+              <div>
+                <div style={{ fontWeight: 800, marginBottom: 10 }}>LTV scoring</div>
+                <Field label="LTV drempel 1"><input style={inputStyle()} type="number" value={rules.ltvThreshold1} onChange={(e) => updateRule("ltvThreshold1", e.target.value)} /></Field>
+                <Field label="LTV score 1"><input style={inputStyle()} type="number" value={rules.ltvScore1} onChange={(e) => updateRule("ltvScore1", e.target.value)} /></Field>
+                <Field label="LTV drempel 2"><input style={inputStyle()} type="number" value={rules.ltvThreshold2} onChange={(e) => updateRule("ltvThreshold2", e.target.value)} /></Field>
+                <Field label="LTV score 2"><input style={inputStyle()} type="number" value={rules.ltvScore2} onChange={(e) => updateRule("ltvScore2", e.target.value)} /></Field>
+                <Field label="LTV drempel 3"><input style={inputStyle()} type="number" value={rules.ltvThreshold3} onChange={(e) => updateRule("ltvThreshold3", e.target.value)} /></Field>
+                <Field label="LTV score 3"><input style={inputStyle()} type="number" value={rules.ltvScore3} onChange={(e) => updateRule("ltvScore3", e.target.value)} /></Field>
+                <Field label="LTV score 4"><input style={inputStyle()} type="number" value={rules.ltvScore4} onChange={(e) => updateRule("ltvScore4", e.target.value)} /></Field>
+
+                <div style={{ fontWeight: 800, margin: "20px 0 10px" }}>DSCR scoring</div>
+                <Field label="DSCR drempel 1"><input style={inputStyle()} type="number" step="0.01" value={rules.dscrThreshold1} onChange={(e) => updateRule("dscrThreshold1", e.target.value)} /></Field>
+                <Field label="DSCR score 1"><input style={inputStyle()} type="number" value={rules.dscrScore1} onChange={(e) => updateRule("dscrScore1", e.target.value)} /></Field>
+                <Field label="DSCR drempel 2"><input style={inputStyle()} type="number" step="0.01" value={rules.dscrThreshold2} onChange={(e) => updateRule("dscrThreshold2", e.target.value)} /></Field>
+                <Field label="DSCR score 2"><input style={inputStyle()} type="number" value={rules.dscrScore2} onChange={(e) => updateRule("dscrScore2", e.target.value)} /></Field>
+                <Field label="DSCR score 3"><input style={inputStyle()} type="number" value={rules.dscrScore3} onChange={(e) => updateRule("dscrScore3", e.target.value)} /></Field>
+              </div>
+
+              <div>
+                <div style={{ fontWeight: 800, marginBottom: 10 }}>Looptijd scoring</div>
+                <Field label="Looptijd drempel 1"><input style={inputStyle()} type="number" value={rules.looptijdThreshold1} onChange={(e) => updateRule("looptijdThreshold1", e.target.value)} /></Field>
+                <Field label="Looptijd score 1"><input style={inputStyle()} type="number" value={rules.looptijdScore1} onChange={(e) => updateRule("looptijdScore1", e.target.value)} /></Field>
+                <Field label="Looptijd drempel 2"><input style={inputStyle()} type="number" value={rules.looptijdThreshold2} onChange={(e) => updateRule("looptijdThreshold2", e.target.value)} /></Field>
+                <Field label="Looptijd score 2"><input style={inputStyle()} type="number" value={rules.looptijdScore2} onChange={(e) => updateRule("looptijdScore2", e.target.value)} /></Field>
+                <Field label="Looptijd score 3"><input style={inputStyle()} type="number" value={rules.looptijdScore3} onChange={(e) => updateRule("looptijdScore3", e.target.value)} /></Field>
+
+                <div style={{ fontWeight: 800, margin: "20px 0 10px" }}>Locatie / debiteur / exit</div>
+                <Field label="Locatie A"><input style={inputStyle()} type="number" value={rules.locatieA} onChange={(e) => updateRule("locatieA", e.target.value)} /></Field>
+                <Field label="Locatie B"><input style={inputStyle()} type="number" value={rules.locatieB} onChange={(e) => updateRule("locatieB", e.target.value)} /></Field>
+                <Field label="Locatie C"><input style={inputStyle()} type="number" value={rules.locatieC} onChange={(e) => updateRule("locatieC", e.target.value)} /></Field>
+                <Field label="Debiteur sterk"><input style={inputStyle()} type="number" value={rules.debiteurSterk} onChange={(e) => updateRule("debiteurSterk", e.target.value)} /></Field>
+                <Field label="Debiteur gemiddeld"><input style={inputStyle()} type="number" value={rules.debiteurGemiddeld} onChange={(e) => updateRule("debiteurGemiddeld", e.target.value)} /></Field>
+                <Field label="Debiteur zwak"><input style={inputStyle()} type="number" value={rules.debiteurZwak} onChange={(e) => updateRule("debiteurZwak", e.target.value)} /></Field>
+                <Field label="Exit refinance"><input style={inputStyle()} type="number" value={rules.exitRefinance} onChange={(e) => updateRule("exitRefinance", e.target.value)} /></Field>
+                <Field label="Exit verkoop"><input style={inputStyle()} type="number" value={rules.exitVerkoop} onChange={(e) => updateRule("exitVerkoop", e.target.value)} /></Field>
+                <Field label="Exit onzeker"><input style={inputStyle()} type="number" value={rules.exitOnzeker} onChange={(e) => updateRule("exitOnzeker", e.target.value)} /></Field>
+              </div>
+
+              <div>
+                <div style={{ fontWeight: 800, marginBottom: 10 }}>Vastgoed scoring</div>
+                <Field label="Woning voor verhuur"><input style={inputStyle()} type="number" value={rules.vastgoedWoning} onChange={(e) => updateRule("vastgoedWoning", e.target.value)} /></Field>
+                <Field label="Zorgvastgoed"><input style={inputStyle()} type="number" value={rules.vastgoedZorg} onChange={(e) => updateRule("vastgoedZorg", e.target.value)} /></Field>
+                <Field label="Kantoor"><input style={inputStyle()} type="number" value={rules.vastgoedKantoor} onChange={(e) => updateRule("vastgoedKantoor", e.target.value)} /></Field>
+                <Field label="Bedrijfsruimte"><input style={inputStyle()} type="number" value={rules.vastgoedBedrijfsruimte} onChange={(e) => updateRule("vastgoedBedrijfsruimte", e.target.value)} /></Field>
+                <Field label="Ontwikkeling"><input style={inputStyle()} type="number" value={rules.vastgoedOntwikkeling} onChange={(e) => updateRule("vastgoedOntwikkeling", e.target.value)} /></Field>
+              </div>
             </div>
           </div>
         </div>
@@ -560,6 +677,8 @@ export default function Page() {
     );
   }
 
+  const pricingBadge = pricingBadgeStyle(result.pricingTone);
+
   return (
     <div style={{ minHeight: "100vh", background: BRAND.cream, padding: 24, fontFamily: "Arial, sans-serif", boxSizing: "border-box" }}>
       <div style={{ maxWidth: 1380, margin: "0 auto", display: "grid", gap: 24 }}>
@@ -578,58 +697,16 @@ export default function Page() {
             <div style={cardStyle(false)}>
               <div style={{ fontSize: 24, fontWeight: 800, marginBottom: 16, color: BRAND.forest }}>Deal invoer</div>
               <div style={{ display: "grid", gap: 18, gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
-                <Field label="Dealnaam">
-                  <input style={inputStyle()} value={form.dealNaam} onChange={(e) => update("dealNaam", e.target.value)} />
-                </Field>
-                <Field label="Leningstype">
-                  <select style={inputStyle()} value={form.loanType} onChange={(e) => update("loanType", e.target.value)}>
-                    <option value="annuitair">Annuitair</option>
-                    <option value="lineair">Lineair</option>
-                    <option value="aflossingsvrij">Aflossingsvrij</option>
-                  </select>
-                </Field>
-                <Field label="Taxatiewaarde" note={euro(form.taxatiewaarde)}>
-                  <input style={inputStyle()} type="number" value={form.taxatiewaarde} onChange={(e) => update("taxatiewaarde", e.target.value)} />
-                </Field>
-                <Field label="Financieringsbedrag" note={euro(form.financieringsbedrag)}>
-                  <input style={inputStyle()} type="number" value={form.financieringsbedrag} onChange={(e) => update("financieringsbedrag", e.target.value)} />
-                </Field>
-                <Field label="DSCR">
-                  <input style={inputStyle()} type="number" step="0.01" value={form.dscr} onChange={(e) => update("dscr", e.target.value)} />
-                </Field>
-                <Field label="Looptijd (maanden)">
-                  <input style={inputStyle()} type="number" value={form.looptijdMaanden} onChange={(e) => update("looptijdMaanden", e.target.value)} />
-                </Field>
-                <Field label="Locatie">
-                  <select style={inputStyle()} value={form.locatie} onChange={(e) => update("locatie", e.target.value)}>
-                    <option value="A">A-locatie</option>
-                    <option value="B">B-locatie</option>
-                    <option value="C">C-locatie</option>
-                  </select>
-                </Field>
-                <Field label="Debiteur">
-                  <select style={inputStyle()} value={form.debiteur} onChange={(e) => update("debiteur", e.target.value)}>
-                    <option value="Sterk">Sterk</option>
-                    <option value="Gemiddeld">Gemiddeld</option>
-                    <option value="Zwak">Zwak</option>
-                  </select>
-                </Field>
-                <Field label="Vastgoedtype">
-                  <select style={inputStyle()} value={form.vastgoedtype} onChange={(e) => update("vastgoedtype", e.target.value)}>
-                    <option value="Woning voor verhuur">Woning voor verhuur</option>
-                    <option value="Zorgvastgoed">Zorgvastgoed</option>
-                    <option value="Kantoor">Kantoor</option>
-                    <option value="Bedrijfsruimte">Bedrijfsruimte</option>
-                    <option value="Ontwikkeling">Ontwikkeling</option>
-                  </select>
-                </Field>
-                <Field label="Exit strategie">
-                  <select style={inputStyle()} value={form.exitStrategie} onChange={(e) => update("exitStrategie", e.target.value)}>
-                    <option value="Refinance">Refinance</option>
-                    <option value="Verkoop">Verkoop</option>
-                    <option value="Onzeker">Onzeker</option>
-                  </select>
-                </Field>
+                <Field label="Dealnaam"><input style={inputStyle()} value={form.dealNaam} onChange={(e) => update("dealNaam", e.target.value)} /></Field>
+                <Field label="Leningstype"><select style={inputStyle()} value={form.loanType} onChange={(e) => update("loanType", e.target.value)}><option value="annuitair">Annuitair</option><option value="lineair">Lineair</option><option value="aflossingsvrij">Aflossingsvrij</option></select></Field>
+                <Field label="Taxatiewaarde" note={euro(form.taxatiewaarde)}><input style={inputStyle()} type="number" value={form.taxatiewaarde} onChange={(e) => update("taxatiewaarde", e.target.value)} /></Field>
+                <Field label="Financieringsbedrag" note={euro(form.financieringsbedrag)}><input style={inputStyle()} type="number" value={form.financieringsbedrag} onChange={(e) => update("financieringsbedrag", e.target.value)} /></Field>
+                <Field label="DSCR"><input style={inputStyle()} type="number" step="0.01" value={form.dscr} onChange={(e) => update("dscr", e.target.value)} /></Field>
+                <Field label="Looptijd (maanden)"><input style={inputStyle()} type="number" value={form.looptijdMaanden} onChange={(e) => update("looptijdMaanden", e.target.value)} /></Field>
+                <Field label="Locatie"><select style={inputStyle()} value={form.locatie} onChange={(e) => update("locatie", e.target.value)}><option value="A">A-locatie</option><option value="B">B-locatie</option><option value="C">C-locatie</option></select></Field>
+                <Field label="Debiteur"><select style={inputStyle()} value={form.debiteur} onChange={(e) => update("debiteur", e.target.value)}><option value="Sterk">Sterk</option><option value="Gemiddeld">Gemiddeld</option><option value="Zwak">Zwak</option></select></Field>
+                <Field label="Vastgoedtype"><select style={inputStyle()} value={form.vastgoedtype} onChange={(e) => update("vastgoedtype", e.target.value)}><option value="Woning voor verhuur">Woning voor verhuur</option><option value="Zorgvastgoed">Zorgvastgoed</option><option value="Kantoor">Kantoor</option><option value="Bedrijfsruimte">Bedrijfsruimte</option><option value="Ontwikkeling">Ontwikkeling</option></select></Field>
+                <Field label="Exit strategie"><select style={inputStyle()} value={form.exitStrategie} onChange={(e) => update("exitStrategie", e.target.value)}><option value="Refinance">Refinance</option><option value="Verkoop">Verkoop</option><option value="Onzeker">Onzeker</option></select></Field>
               </div>
 
               <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(3, minmax(0, 1fr))", marginTop: 22, background: BRAND.soft, border: `1px solid ${BRAND.border}`, borderRadius: 24, padding: 18 }}>
@@ -660,26 +737,10 @@ export default function Page() {
                     </tr>
                   </thead>
                   <tbody>
-                    <tr>
-                      <td style={{ padding: "14px 16px" }}>Admin leningnemer</td>
-                      <td style={{ padding: "14px 16px" }}>{euro(costs.adminPerYear, 2)}</td>
-                      <td style={{ padding: "14px 16px" }}>{euro(costs.adminTotal, 2)}</td>
-                    </tr>
-                    <tr>
-                      <td style={{ padding: "14px 16px" }}>Admin investeerder</td>
-                      <td style={{ padding: "14px 16px" }}>{euro(costs.investorFeePerYear, 2)}</td>
-                      <td style={{ padding: "14px 16px" }}>{euro(costs.investorFeeTotal, 2)}</td>
-                    </tr>
-                    <tr>
-                      <td style={{ padding: "14px 16px" }}>Afsluitprovisie</td>
-                      <td style={{ padding: "14px 16px" }}>-</td>
-                      <td style={{ padding: "14px 16px" }}>{euro(costs.closingFee, 2)}</td>
-                    </tr>
-                    <tr>
-                      <td style={{ padding: "14px 16px", fontWeight: 800 }}>Totale omzet</td>
-                      <td style={{ padding: "14px 16px", fontWeight: 800 }}>{euro(costs.adminPerYear + costs.investorFeePerYear, 2)}</td>
-                      <td style={{ padding: "14px 16px", fontWeight: 800 }}>{euro(costs.adminTotal + costs.investorFeeTotal + costs.closingFee, 2)}</td>
-                    </tr>
+                    <tr><td style={{ padding: "14px 16px" }}>Admin leningnemer</td><td style={{ padding: "14px 16px" }}>{euro(costs.adminPerYear, 2)}</td><td style={{ padding: "14px 16px" }}>{euro(costs.adminTotal, 2)}</td></tr>
+                    <tr><td style={{ padding: "14px 16px" }}>Admin investeerder</td><td style={{ padding: "14px 16px" }}>{euro(costs.investorFeePerYear, 2)}</td><td style={{ padding: "14px 16px" }}>{euro(costs.investorFeeTotal, 2)}</td></tr>
+                    <tr><td style={{ padding: "14px 16px" }}>Afsluitprovisie</td><td style={{ padding: "14px 16px" }}>-</td><td style={{ padding: "14px 16px" }}>{euro(costs.closingFee, 2)}</td></tr>
+                    <tr><td style={{ padding: "14px 16px", fontWeight: 800 }}>Totale omzet</td><td style={{ padding: "14px 16px", fontWeight: 800 }}>{euro(costs.adminPerYear + costs.investorFeePerYear, 2)}</td><td style={{ padding: "14px 16px", fontWeight: 800 }}>{euro(costs.adminTotal + costs.investorFeeTotal + costs.closingFee, 2)}</td></tr>
                   </tbody>
                 </table>
               </div>
@@ -728,6 +789,8 @@ export default function Page() {
                 <div style={{ display: "inline-flex", padding: "8px 12px", borderRadius: 999, background: result.riskBg, color: result.riskColor, fontSize: 13, fontWeight: 700 }}>{result.riskLabel}</div>
                 <div style={{ display: "inline-flex", padding: "8px 12px", borderRadius: 999, background: "rgba(255,255,255,0.12)", color: BRAND.white, fontSize: 13, fontWeight: 700 }}>Score {result.score}</div>
                 <div style={{ display: "inline-flex", padding: "8px 12px", borderRadius: 999, background: "rgba(255,255,255,0.12)", color: BRAND.white, fontSize: 13, fontWeight: 700 }}>{pricingMode} pricing</div>
+                <div style={{ display: "inline-flex", padding: "8px 12px", borderRadius: 999, background: "rgba(255,255,255,0.12)", color: BRAND.white, fontSize: 13, fontWeight: 700 }}>Benchmark: {pct(result.benchmark)}</div>
+                <div style={{ display: "inline-flex", padding: "8px 12px", borderRadius: 999, fontSize: 13, fontWeight: 800, ...pricingBadge }}>{result.pricingLabel}</div>
               </div>
             </div>
 
@@ -746,26 +809,11 @@ export default function Page() {
             <div style={cardStyle(false)}>
               <div style={{ fontSize: 24, fontWeight: 800, marginBottom: 16, color: BRAND.forest }}>Snelle deal beoordeling</div>
               <div style={{ display: "grid", gap: 12 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", padding: "14px 16px", border: `1px solid ${BRAND.border}`, borderRadius: 18 }}>
-                  <span style={{ color: "#475569" }}>Risico categorie</span>
-                  <strong>{result.riskLabel}</strong>
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between", padding: "14px 16px", border: `1px solid ${BRAND.border}`, borderRadius: 18 }}>
-                  <span style={{ color: "#475569" }}>LTV beoordeling</span>
-                  <strong>{result.ltv <= 65 ? "Sterk" : result.ltv <= 80 ? "Acceptabel" : "Risicovol"}</strong>
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between", padding: "14px 16px", border: `1px solid ${BRAND.border}`, borderRadius: 18 }}>
-                  <span style={{ color: "#475569" }}>DSCR beoordeling</span>
-                  <strong>{form.dscr >= 1.4 ? "Sterk" : form.dscr >= 1.25 ? "Gemiddeld" : "Zwak"}</strong>
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between", padding: "14px 16px", border: `1px solid ${BRAND.border}`, borderRadius: 18 }}>
-                  <span style={{ color: "#475569" }}>Loan sizing</span>
-                  <strong>{euro(form.financieringsbedrag)}</strong>
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between", padding: "14px 16px", border: `1px solid ${BRAND.border}`, borderRadius: 18 }}>
-                  <span style={{ color: "#475569" }}>Verwachte opbrengst (totaal)</span>
-                  <strong>{euro(costs.adminTotal + costs.investorFeeTotal + costs.closingFee)}</strong>
-                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "14px 16px", border: `1px solid ${BRAND.border}`, borderRadius: 18 }}><span style={{ color: "#475569" }}>Risico categorie</span><strong>{result.riskLabel}</strong></div>
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "14px 16px", border: `1px solid ${BRAND.border}`, borderRadius: 18 }}><span style={{ color: "#475569" }}>LTV beoordeling</span><strong>{result.ltv <= 65 ? "Sterk" : result.ltv <= 80 ? "Acceptabel" : "Risicovol"}</strong></div>
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "14px 16px", border: `1px solid ${BRAND.border}`, borderRadius: 18 }}><span style={{ color: "#475569" }}>DSCR beoordeling</span><strong>{num(form.dscr) >= 1.4 ? "Sterk" : num(form.dscr) >= 1.25 ? "Gemiddeld" : "Zwak"}</strong></div>
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "14px 16px", border: `1px solid ${BRAND.border}`, borderRadius: 18 }}><span style={{ color: "#475569" }}>Loan sizing</span><strong>{euro(form.financieringsbedrag)}</strong></div>
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "14px 16px", border: `1px solid ${BRAND.border}`, borderRadius: 18 }}><span style={{ color: "#475569" }}>Verwachte opbrengst (totaal)</span><strong>{euro(costs.adminTotal + costs.investorFeeTotal + costs.closingFee)}</strong></div>
               </div>
 
               <div style={{ marginTop: 20, fontSize: 24, fontWeight: 800, color: BRAND.forest }}>Advies & beslissing</div>
