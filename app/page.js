@@ -189,7 +189,7 @@ function calculateAdvice(input, rules) {
   const minRate = num(rules.minRate);
   const maxRate = num(rules.maxRate);
   const mid = minRate + (maxRate - minRate) * normalized;
-  const spread = score <= 10 ? 0.2 : score <= 14 ? 0.25 : 0.3;
+  const spread = 0.2 + (score / 20) * 0.15;
 
   let riskLabel = "Laag risico";
   let riskBg = BRAND.greenBg;
