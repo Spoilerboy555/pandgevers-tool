@@ -669,6 +669,10 @@ const updateDealStatus = (id, status) => {
     totalDeals > 0 ? ((doneCount / totalDeals) * 100).toFixed(1) : 0;
   
   const totalRevenueDone = doneDeals.reduce(
+  const totalLoanDone = doneDeals.reduce(
+    (sum, d) => sum + (d.form?.financieringsbedrag || 0),
+    0
+  );
     (sum, d) =>
       sum +
       (d.costs?.adminTotal || 0) +
@@ -727,6 +731,9 @@ const updateDealStatus = (id, status) => {
           
             <div style={{ ...cardStyle(false), padding: 16 }}>
               <div style={{ fontSize: 12 }}>Omzet (gedaan)</div>
+              <div style={{ fontSize: 12, color: "#64748B" }}>
+                Leensom: {euro(totalLoanDone, 0)}
+              </div>
               <div style={{ fontSize: 18, fontWeight: 800 }}>
                 {euro(totalRevenueDone, 0)}
               </div>
@@ -810,7 +817,12 @@ const updateDealStatus = (id, status) => {
                       </div>
                       <div style={{ fontSize: 12, color: "#64748B" }}>{entry.savedAt}</div>
                     </div>
-                    <div style={{ fontWeight: 800 }}>{pct(entry.result.rateMid)}</div>
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
+                      <div style={{ fontWeight: 800 }}>{pct(entry.result.rateMid)}</div>
+                      <div style={{ fontSize: 12, color: "#64748B" }}>
+                        {euro(entry.form.financieringsbedrag)}
+                      </div>
+                    </div>
                   </div>
                   <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap" }}>
                     <button onClick={() => loadDeal(entry)} style={smallButtonStyle(false)}>Open</button>
