@@ -668,11 +668,7 @@ const updateDealStatus = (id, status) => {
   const conversion =
     totalDeals > 0 ? ((doneCount / totalDeals) * 100).toFixed(1) : 0;
   
-  const totalRevenueDone = doneDeals.reduce(
-  const totalLoanDone = doneDeals.reduce(
-    (sum, d) => sum + (d.form?.financieringsbedrag || 0),
-    0
-  );
+   const totalRevenueDone = doneDeals.reduce(
     (sum, d) =>
       sum +
       (d.costs?.adminTotal || 0) +
@@ -681,6 +677,11 @@ const updateDealStatus = (id, status) => {
     0
   );
   
+  const totalLoanDone = doneDeals.reduce(
+    (sum, d) => sum + (d.form?.financieringsbedrag || 0),
+    0
+  );
+    
   const donePct = totalDeals ? (doneCount / totalDeals) * 100 : 0;
   const rejectedPct = totalDeals ? (rejectedCount / totalDeals) * 100 : 0;
   const openPct = totalDeals ? (openCount / totalDeals) * 100 : 0;
