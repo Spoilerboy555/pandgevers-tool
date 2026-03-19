@@ -528,6 +528,7 @@ export default function Page() {
     const entry = {
       id: Date.now(),
       savedAt: new Date().toLocaleString("nl-NL"),
+      status: "Ter beoordeling",
       form,
       result,
       costs,
@@ -543,10 +544,13 @@ export default function Page() {
   };
 
   const deleteDeal = (id) => {
-    const next = savedDeals.filter((entry) => entry.id !== id);
-    setSavedDeals(next);
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-  };
+  const updateDealStatus = (id, status) => {
+    const next = savedDeals.map((entry) =>
+      entry.id === id ? { ...entry, status } : entry
+  );
+  setSavedDeals(next);
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+};
 
   if (view === "voorwaarden") {
     const updateRule = (key, value) => {
@@ -659,14 +663,56 @@ export default function Page() {
                 <div key={entry.id} style={{ border: `1px solid ${BRAND.border}`, borderRadius: 18, padding: 14 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
                     <div>
-                      <div style={{ fontWeight: 800 }}>{entry.form.dealNaam}</div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <div style={{ fontWeight: 800 }}>{entry.form.dealNaam}</div>
+
+                        <div
+                          style={{
+                            fontSize: 11,
+                            fontWeight: 800,
+                            padding: "4px 8px",
+                            borderRadius: 999,
+                            background:
+                              entry.status === "Gedaan"
+                                ? BRAND.greenBg
+                                : entry.status === "Afgekeurd"
+                                ? BRAND.redBg
+                                : BRAND.orangeBg,
+                            color:
+                              entry.status === "Gedaan"
+                                ? BRAND.greenText
+                                : entry.status === "Afgekeurd"
+                                ? BRAND.redText
+                                : BRAND.orangeText,
+                          }}
+                        >
+                          {entry.status || "Ter beoordeling"}
+                        </div>
+                      </div>
                       <div style={{ fontSize: 12, color: "#64748B" }}>{entry.savedAt}</div>
                     </div>
                     <div style={{ fontWeight: 800 }}>{pct(entry.result.rateMid)}</div>
                   </div>
-                  <div style={{ marginTop: 10, display: "flex", gap: 10 }}>
+                  <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap" }}>
                     <button onClick={() => loadDeal(entry)} style={smallButtonStyle(false)}>Open</button>
                     <button onClick={() => deleteDeal(entry.id)} style={smallButtonStyle(true)}>Verwijder</button>
+
+                    <select
+                      value={entry.status || "Ter beoordeling"}
+                      onChange={(e) => updateDealStatus(entry.id, e.target.value)}
+                      style={{
+                        borderRadius: 12,
+                        padding: "8px 10px",
+                        border: `1px solid ${BRAND.border}`,
+                        fontSize: 12,
+                        fontWeight: 700,
+                        color: BRAND.forest,
+                     }}
+                   >
+                    <option value="Ter beoordeling">🟡 Ter beoordeling</option>
+                    <option value="Gedaan">🟢 Gedaan</option>
+                    <option value="Afgekeurd">🔴 Afgekeurd</option>
+                    </select>
                   </div>
                 </div>
               ))}
