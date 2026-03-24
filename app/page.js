@@ -323,9 +323,161 @@ function pricingBadgeStyle(pricingTone) {
   return { background: BRAND.greenBg, color: BRAND.greenText };
 }
 
-function downloadPdf(form, result, _costs, yearlyOverview) {
+function generateRiskText(form, result) {
+  if (result.score <= 10) {
+    return "Deze financieringsaanvraag wordt gekenmerkt door een laag risicoprofiel. De combinatie van een sterke LTV, solide debiteur en stabiele kasstromen resulteert in een conservatieve risico-inschatting.";
+  }
+  if (result.score <= 14) {
+    return "De aanvraag kent een gemiddeld risicoprofiel. Enkele factoren zoals LTV, looptijd of debiteur zorgen voor een verhoogd risico, maar blijven binnen acceptabele bandbreedtes.";
+  }
+  return "Deze aanvraag kent een verhoogd risicoprofiel. Factoren zoals hoge leverage, zwakkere debiteur of ontwikkelingscomponent zorgen voor een duidelijke risicopremie.";
+}
+
+function downloadPdf(form, result, costs, yearlyOverview) {
   const popup = window.open("", "_blank", "width=900,height=700");
   if (!popup) return;
+
+  const riskPct = Math.min(100, Math.round((result.score / 20) * 100));
+
+  const yearRows = yearlyOverview
+    .map(
+      (row) => `
+      <tr>
+        <td>${row.year}</td>
+        <td><strong>${euro(row.beginBalance, 2)}</strong></td>
+        <td>${euro(row.principal, 2)}</td>
+        <td>${euro(row.interest, 2)}</td>
+        <td>${euro(row.adminFee, 2)}</td>
+        <td><strong>${euro(row.endingBalance, 2)}</strong></td>
+      </tr>`
+    )
+    .join("");
+
+  const riskRows = result.breakdown
+    .map((item) => `<tr><td>${item.label}</td><td>${item.value}</td></tr>`)
+    .join("");
+
+  const content = `
+  <html>
+  <head>
+    <title>Risico rapport</title>
+    <style>
+      body { font-family: Arial; padding: 40px; color: #16343B; }
+      h1 { color: #00424D; }
+      h2 { margin-top: 30px; color: #00424D; }
+      table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+      th, td { border-bottom: 1px solid #E7DDD1; padding: 10px; font-size: 13px; text-align: left; }
+
+      .card {
+        border: 1px solid #E7DDD1;
+        border-radius: 16px;
+        padding: 16px;
+        margin-top: 16px;
+      }
+
+      .heatbar {
+        height: 16px;
+        border-radius: 999px;
+        overflow: hidden;
+        display: flex;
+      }
+
+      .low { background: #DCFCE7; width: 33%; }
+      .mid { background: #FFEDD5; width: 33%; }
+      .high { background: #FEE2E2; width: 34%; }
+
+      .indicator {
+        height: 16px;
+        background: #00424D;
+      }
+    </style>
+  </head>
+
+  <body>
+
+    <img src="/logo.png" style="height:60px;" />
+
+    <h1>Financieringsrapport</h1>
+
+    <div class="card">
+      <strong>Deal:</strong> ${form.dealNaam}<br/>
+      <strong>Lening:</strong> ${euro(form.financieringsbedrag)}<br/>
+      <strong>Looptijd:</strong> ${form.looptijdMaanden} maanden<br/>
+    </div>
+
+    <h2>Rente advies</h2>
+    <div class="card">
+      <strong>${pct(result.rateMin)} - ${pct(result.rateMax)}</strong><br/>
+      Indicatief: ${pct(result.rateMid)}<br/>
+      Benchmark: ${pct(result.benchmark)}
+    </div>
+
+    <h2>Risico profiel</h2>
+    <div class="card">
+      <strong>${result.riskLabel}</strong><br/><br/>
+
+      <div class="heatbar">
+        <div class="low"></div>
+        <div class="mid"></div>
+        <div class="high"></div>
+      </div>
+      <div class="indicator" style="width:${riskPct}%"></div>
+
+      <p style="margin-top:12px;">
+        ${generateRiskText(form, result)}
+      </p>
+    </div>
+
+    <h2>Risico-opbouw</h2>
+    <table>
+      <thead>
+        <tr><th>Factor</th><th>Score</th></tr>
+      </thead>
+      <tbody>
+        ${riskRows}
+      </tbody>
+    </table>
+
+    <h2>Kerngegevens</h2>
+    <table>
+      <tr><td>LTV</td><td>${pct(result.ltv)}</td></tr>
+      <tr><td>DSCR</td><td>${form.dscr}</td></tr>
+      <tr><td>Vastgoed</td><td>${form.vastgoedtype}</td></tr>
+      <tr><td>Exit</td><td>${form.exitStrategie}</td></tr>
+    </table>
+
+    <h2>Kosten (leningnemer)</h2>
+    <table>
+      <tr><td>Admin fee</td><td>${euro(costs.adminTotal)}</td></tr>
+      <tr><td>Afsluitprovisie</td><td>${euro(costs.closingFee)}</td></tr>
+    </table>
+
+    <h2>Verloop lening</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Jaar</th>
+          <th>Beginschuld</th>
+          <th>Aflossing</th>
+          <th>Rente</th>
+          <th>Admin</th>
+          <th>Restschuld</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${yearRows}
+      </tbody>
+    </table>
+
+  </body>
+  </html>
+  `;
+
+  popup.document.open();
+  popup.document.write(content);
+  popup.document.close();
+  popup.print();
+}
 
   const yearRows = yearlyOverview
     .map(
